@@ -1,14 +1,17 @@
-# 2026-10-28 驗證
+# 2026-10-28 驗證結果
 
-10 個模擬後端測試通過：
-- Firebase token 缺失／管理員 UID／撤銷失效時拒絕存取。
-- CORS 不允許未設定來源；API 回傳不包含電話、API Hash 或 Session。
-- Firestore 帳號資料先加密後儲存，可解密還原。
-- 時段與訊息驗證、儲存排程後暫停、跨午夜與結束邊界。
-- TG 兩步驗證流程，驗證碼與密碼不寫入帳號紀錄。
-- 相同時段只送一次、逾時後暫停、FloodWait 冷卻。
-- 中斷工作不自動重播、刪除帳號資料後下次 tick 暫停。
+23 項模擬測試通過：13 項新電腦端測試，10 項保留的 Cloud Run 後端測試。
 
-另外完成：Python compileall、頁面兩段內嵌 JavaScript 與 telegram.js 的 node --check、HTML ID 唯一性、bash -n backend/deploy.sh。
+電腦端：
+- Firestore 值編解碼、空更新防護，避免不帶遮罩的更新破壞既有資料。
+- 不覆寫原 dashboard、提醒或其他根欄位。
+- 同時兩台電腦的執行權、全域時段領取與中斷保護。
+- 手動核對後解除阻擋，但不重送原時段。
+- 正常送出只執行一次、結果不明時暫停、限流冷卻跨時段保留。
+- 雲端領取失敗時不送 TG；結果回報失敗後保留待確認狀態。
+- 刪除帳號、無本機登入、無效排程都不執行。
+- Firebase refresh token 輪替保存與管理員 UID 驗證。
 
-未完成：Google Cloud 實際部署、真實 Firestore transaction 整合、TG 真實登入／發訊、50 帳號負載、瀏覽器視覺測試。測試不能證明正式環境已可使用。
+另外：Python compileall、index.html 內嵌 JavaScript、desktop.js 的 node --check、HTML ID 唯一性。
+
+未完成：Windows DPAPI / ACL / 開機自動啟動實機驗證；真實 Firebase 規則 / REST updateTime 衝突整合；TG 真實收碼與發訊；50 帳號負載；瀏覽器視覺測試。模擬測試不代表正式環境已可連線。

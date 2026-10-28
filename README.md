@@ -1,76 +1,74 @@
-# TG Control Center
+# TG Control Center 3.0 — Windows 執行、手機管理
 
-接續原有 Firebase Authentication + Firestore + GitHub Pages 專案。
+沿用原 GitHub Pages 網站與 Firebase Authentication / Firestore。主模式改為 Windows 電腦主動讀取 Firebase 設定，執行 Telegram 工作並回報結果。**不需要 Cloud Run、Cloud Scheduler、公開電腦連接埠或同一個 Wi-Fi。**
 
-## 現況
+網站：https://tristaru816-wq.github.io/tg-control-center/
 
-- 原本的管理員登入、帳號／排程／考勤提醒與雲端資料格式保留。
-- 新增「連接 TG」頁：可呼叫後端取得 TG 驗證碼、兩步驗證登入、登出、檢查連線、設定並啟用每日排程。
-- `backend/` 提供 Cloud Run 執行 API；Cloud Scheduler 每分鐘觸發，後端依每帳號 3／5／10／15 分鐘與台北時段判斷是否執行。
-- **只更新 GitHub Pages 不會啟動後端。必須完成以下 Google Cloud 部署，才可真實連接 TG。**
-- 尚未實作截圖打卡、機器人按鈕與回覆判讀；訊息被 Telegram 接受不表示機器人確認成功或真人在場。
+## 第一次使用
 
-## 完成一次雲端部署
+1. 在 Windows 安裝 Python 3.11 或以上版本，安裝時包含 Python Launcher。
+2. 下載 ZIP 並完整解壓到固定位置。從整個 GitHub 儲存庫下載者，進入 `desktop` 資料夾；獨立執行器 ZIP 則直接進入解壓後的資料夾。
+3. 雙擊 `start.cmd`。第一次會安裝 Telethon、requests 與時區資料，需要網路。
+4. 輸入原網站的 **Firebase 管理員信箱與密碼**（不是 Google 帳號密碼）。密碼輸入時不會顯示字元，輸入後按 Enter。
+5. 若尚無帳號資料，先用手機登入原網站，在「帳號」頁新增名稱，等候 Firebase 同步。
+6. 電腦選單選 `1`，選擇對應名稱，填自己的 TG 電話、API ID / API Hash，輸入 Telegram 驗證碼；需要時再填兩步驗證密碼。
+7. 可重複選 `1` 登入其他帳號。完成後選 `2` 啟動同步與排程，保持電腦視窗開著。
+8. 手機開原網站的「電腦執行」，確認電腦顯示已連線、TG 帳號可用。儲存執行排程後再按啟用。
 
-需要使用有權管理 Firebase `tg-control-center` 專案的 Google 帳號登入 Google Cloud Shell。部署需啟用 Google Cloud 計費，Cloud Run、Firestore、Secret Manager、Cloud Build、Scheduler 可能產生用量費用。本儲存庫更新不會自動建立這些資源。
+日後雙擊 `start.cmd`，會以已保存的登入啟動執行。要新增帳號、更換管理員登入或登出 TG，先 Ctrl+C 停止執行器，再雙擊 `setup.cmd`。
 
-在 https://shell.cloud.google.com 開啟 Cloud Shell，執行：
+自己的 Telegram API ID / Hash 可至 https://my.telegram.org 申請。不要把驗證碼、API Hash、密碼、Session 或 data 資料夾傳給其他人，也不必傳給 ChatGPT。
 
-```bash
-git clone https://github.com/tristaru816-wq/tg-control-center.git
-cd tg-control-center
-bash backend/deploy.sh
-```
+## 手機操作
 
-如果已經下載過此儲存庫，請在原資料夾 `git pull` 後執行部署腳本。不要把 Telegram API Hash、驗證碼、密碼、Session 或服務帳號金鑰提交到 GitHub。
+- 原「帳號」頁管理名稱（最多 50 個）；「排程／考勤」頁繼續保留為原本草稿及提醒。
+- **只有「電腦執行」頁啟用的排程才會實際執行**，既有草稿不會自動轉為群組發送。
+- 每個帳號一組每日排程，可選 3、5、10、15 分鐘。台北時區，支援 22:00–02:00 跨午夜。
+- 先以自己的測試帳號做「只檢查連線」，確定有新紀錄後，再使用自己的測試群組驗證文字打卡。
+- 發送目標用可解析的公開 @username、機器人名稱或已加入群組 ID；群組權限與機器人指令需自行確認。
+- 儲存排程會暫停，啟用前會再次確認。目前時段可能在下次輪詢立即執行；不補發先前錯過的時段。
+- 連線檢查不保證 Telegram 顯示在線。訊息送出僅記錄 Telegram 接受，不代表機器人確認或真人出勤。
+- 若「結果待確認」，先人工查看群組，再按「已核對結果，解除暫停」，最後自行啟用。原時段不會重送。
+- 暫停指令需等電腦下次讀取，已開始或已送出的操作無法撤回。電腦忙於前一個帳號或網路延遲時，讀取與執行也會延後。
 
-腳本會建立 runtime / scheduler 服務帳號、Secret Manager 加密金鑰、Cloud Run API 與每分鐘排程；最後只合併寫入原 `adminData/<管理員UID>` 的 `executionEndpoint` 欄位，保留 `dashboard` 與其他資料。金鑰若已存在會沿用，不會重建。
+## 持續運行
 
-部署成功後重新登入原 GitHub Pages 網站，進入「連接 TG」，服務網址會自動載入。既有草稿與提醒不會自動轉為真實發送任務。
+Windows 須保持開機、連網且不進入睡眠；手機可關閉網站，也可使用行動網路。關閉程式、睡眠或斷網後不會執行；雲端指令不會在沒有執行器時自己發送。
 
-### 第一次驗收
+每 15 秒輪詢設定、約每 30 秒回報心跳。超過 120 秒未回報，網頁顯示未連線／過期；網頁顯示的是最後已知狀態，不能保證裝置即時在線。
 
-1. 在「帳號」頁新增自己的測試帳號資料，確認 Firebase 已同步。
-2. 在「連接 TG」頁選帳號，填國碼電話與你從 https://my.telegram.org 取得的 API ID / Hash，請求驗證碼。
-3. 直接在網站輸入 TG 驗證碼；若回應需要兩步驗證，再輸入密碼。不要把這些資料傳到對話中。
-4. 按「檢查連線」。確認成功後，設定目前時段、3 分鐘、只檢查連線並啟用。
-5. 關閉網頁，幾分鐘後重開並按更新狀態，確認有新的台北時間結果。
-6. 再使用自己的測試群組設定文字發送，啟用前會再次確認目標。確認實際群組只收到一則，再增加帳號數。
+如需登入 Windows 後自動啟動，先完成首次登入，右鍵以 PowerShell 執行 `enable_startup.ps1`。若系統阻擋腳本，可將 `start.cmd` 的捷徑手動放進 Win+R → `shell:startup`。取消執行 `disable_startup.ps1` 或刪除捷徑。這不是登入 Windows 前執行的系統服務。
 
-## 安全與執行規則
+## 資料與保護
 
-- 後端以 Firebase Admin SDK 驗證 ID token 及撤銷狀態，並限制原有管理員 UID；不使用共用管理密碼。
-- Cloud Run 在入口允許公開 HTTP，但每個管理 API 都要求 Firebase 管理員 token。`/health` 無敏感資料；`/tick` 只接受指定 Scheduler 服務帳號的 Google OIDC token 與指定 audience。
-- TG API Hash、StringSession、電話、排程內容先用 Fernet 加密再存入 Firestore；加密金鑰只在 Secret Manager。驗證碼與兩步驗證密碼不持久保存。
-- Firestore 的 `_tgAccounts`、`_tgLocks`、`_tgRuns` 應拒絕所有前端 SDK 存取。附帶規則檔提供 TG 專案專用設定；部署腳本不會自行覆蓋你已發布的 Firestore 規則。
-- 帳號 lease 使用 Firestore transaction，工作有逾時；每帳號每時段以唯一文件記錄，發送不明確時暫停，避免盲目補發。Telegram 網路發送無法保證端到端恰好一次。
-- 網路中斷／程序中止後，請先人工核對群組，再按連線檢查清除待確認標記，最後自行啟用；不補發歷史時段。
-- 開始時間包含、結束時間不包含，支援跨午夜。啟用時在目前區段內可能在下一次 Scheduler 呼叫立即執行；最多約一分鐘排程解析度，受雲端延遲影響。
-- FloodWait 會保存冷卻時間，冷卻結束前不再執行；本時段不補發。
-- 從原帳號頁刪除資料後，後端會在下一次排程呼叫暫停對應工作；已開始或已發送的操作無法撤回。要立即停用並撤銷 TG 授權請先按「暫停」與「登出 TG」。
-- 執行帳號狀態與草稿分開保存，後台原「啟用設定」不等於 TG 已登入或排程已啟用。
+- 繼續使用原 Firebase 管理員與 `adminData/<原UID>`；原 dashboard 不覆寫。
+- 電腦用 Firebase 使用者 token 與現有管理員規則，不需要下載服務帳號金鑰。
+- 電腦只合併更新 `desktopLease`、`desktopStatus`，網頁只合併寫入 `desktopConfig`；用 Firestore updateTime 前置條件協調執行權與時段領取。
+- 同一時間只允許一台電腦取得執行權；另一台等待租約到期。帳號時段在發送前先寫入雲端，結果不明時阻擋新發送；不能保證端到端恰好一次。
+- Firebase refresh token 與本機 API 設定使用 Windows DPAPI 保存，只能由對應 Windows 使用者解密。管理員密碼、TG 驗證碼與兩步驗證密碼不持久保存。
+- Telethon session 是本機 SQLite 檔，未另外加密；data 資料夾限制目前 Windows 使用者存取。擁有本機權限或拿到 session 的人仍可能存取 TG，請保護電腦，不要備份到公開或共用位置。
+- `data/` 同時包含本機執行紀錄與已處理時段，請勿複製到其他正在運作的執行器；移動或更換 Windows 使用者需要重新登入。
+- TG session 外洩時，從 Telegram 官方應用程式「裝置」撤銷相關登入。Firebase 管理登入可在電腦 `setup.cmd` 選單重新設定。
+- 原 Cloud Run 選項保留在 backend，但本模式不會呼叫或建立雲端執行資源。如你曾自行啟動 Cloud Scheduler，切換前需停用其工作以避免兩種模式同時操作。
 
-## 權限與部署問題
-
-必須先建立 Firestore（沿用既有的 default 資料庫）與 Firebase Email/Password 管理員。若部署提示計費未啟用或沒有權限，需由專案擁有者處理。若 Cloud Build 提示預設建置服務帳號缺權限，按錯誤中列出的建置帳號授予官方所需的 `roles/run.builder`，不要把 runtime 帳號設為專案擁有者。
-
-若已更換網域，修改 `backend/deploy.sh` 的 `ALLOWED_ORIGINS`。Firebase 登入的授權網域也需包含該網域。這次預設沿用原 GitHub Pages。
-
-若無法連接，先查看 Cloud Run 日誌、Cloud Scheduler 最近執行狀態與 Secret Manager 權限。勿在日誌中加入 token、驗證碼或 session。Scheduler 若沒有發出 OIDC token，確認專案的 Cloud Scheduler service agent 有其官方要求的服務代理角色。
-
-請保留 Secret Manager `tg-session-key`；刪除或更換金鑰會讓既有 session 無法解密，屆時需先從 Telegram 官方應用程式「裝置」撤銷相關 session，再重新設定。
+Firebase 仍有讀寫用量與原專案配額限制。本模式減少額外部署，但不代表所有 Firebase 用量永久免費。
 
 ## 驗證與限制
 
-本次通過 Python 後端模擬測試、Python 編譯、JavaScript 語法與部署腳本語法檢查。尚未在真實 Google Cloud 部署、驗證 Firestore transaction 整合、收取 TG 驗證碼、發送真實訊息或測試 50 帳號負載。瀏覽器視覺測試受當前環境限制，未完成。
+23 項模擬測試通過（13 項電腦端 + 10 項先前後端）：資料不覆寫、空更新防護、全域執行權、時段去重、發送不明時暫停、手動核對解除、限流、token 更新、跨日等。完成 Python 編譯與 JavaScript 語法檢查。
+
+尚未進行 Windows DPAPI／自動啟動實機測試、真實 Firebase 規則與 updateTime 整合、TG 真實收碼／群組發訊、50 帳號負載與瀏覽器視覺測試。這是待你電腦完成首次驗收的原始碼版本，尚非已驗證 EXE。
+
+未提供截圖打卡、機器人按鈕點擊及機器人回覆判讀。
+
+## 開發測試
 
 ```bash
-python -m pip install -r backend/requirements.txt pytest httpx
+python -m pip install -r backend/requirements.txt -r desktop/requirements.txt pytest httpx
 python -m pytest -q
 ```
 
-官方參考：
-- https://firebase.google.com/docs/auth/admin/verify-id-tokens
-- https://docs.cloud.google.com/run/docs/triggering/using-scheduler
-- https://docs.cloud.google.com/scheduler/docs/http-target-auth
+技術參考：
+- https://firebase.google.com/docs/reference/rest/auth
+- https://firebase.google.com/docs/firestore/reference/rest/v1/projects.databases.documents
 - https://docs.telethon.dev/en/stable/basic/signing-in.html
