@@ -11,6 +11,38 @@ DOCUMENT=f'https://firestore.googleapis.com/v1/projects/{PROJECT}/databases/(def
 class CloudError(Exception):pass
 class Conflict(CloudError):pass
 
+
+def auth_error(response,action='登入'):
+    """Expose only known provider codes; never echo response bodies or credentials."""
+    messages={
+        'INVALID_LOGIN_CREDENTIALS':'信箱或 Firebase 密碼不符；請用無痕網頁確認同一組帳密',
+        'INVALID_PASSWORD':'Firebase 密碼不符',
+        'EMAIL_NOT_FOUND':'Firebase 找不到此信箱',
+        'INVALID_EMAIL':'信箱格式錯誤',
+        'USER_DISABLED':'此 Firebase 帳號已停用',
+        'OPERATION_NOT_ALLOWED':'Firebase 未允許 Email/Password 登入',
+        'TOO_MANY_ATTEMPTS_TRY_LATER':'登入嘗試過多，請稍候再試',
+        'API_KEY_INVALID':'Firebase API key 無效',
+        'API_KEY_HTTP_REFERRER_BLOCKED':'API key 只允許網站來源，電腦腳本被限制',
+        'API_KEY_SERVICE_BLOCKED':'API key 未允許所需的 Firebase 登入 API',
+        'API_KEY_IP_ADDRESS_BLOCKED':'API key 的 IP 限制阻擋此電腦',
+        'MISSING_OR_INVALID_NONCE':'登入驗證設定不相容',
+        'MFA_REQUIRED':'帳號需要多因素驗證，目前腳本未支援此登入流程',
+        'INVALID_REFRESH_TOKEN':'已保存的登入失效，請開 setup.cmd 重新登入管理員',
+        'TOKEN_EXPIRED':'登入已過期，請開 setup.cmd 重新登入管理員',
+        'USER_NOT_FOUND':'已保存的管理員登入不再有效',
+    }
+    code='HTTP_'+str(response.status_code)
+    try:
+        error=response.json().get('error',{})
+        candidate=str(error.get('message','')).split(' : ')[0].strip()
+        if candidate in messages:code=candidate
+        for detail in error.get('details',[]):
+            reason=detail.get('reason','') if isinstance(detail,dict) else ''
+            if reason in messages:code=reason;break
+    except (ValueError,TypeError,AttributeError):pass
+    return CloudError(f'Firebase {action}失敗 [{code}]：'+messages.get(code,'請將此錯誤代碼回報；不要傳密碼'))
+
 def encode(v):
     if v is None:return {'nullValue':None}
     if isinstance(v,bool):return {'booleanValue':v}
@@ -36,7 +68,7 @@ class Cloud:
         except (OSError,ValueError,KeyError):pass
     def login(self,email,password):
         r=requests.post(f'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={API_KEY}',json={'email':email,'password':password,'returnSecureToken':True},timeout=15)
-        if not r.ok:raise CloudError('Firebase 登入失敗，請確認管理員信箱與密碼')
+        if not r.ok:raise auth_error(r)
         d=r.json()
         if d.get('localId')!=ADMIN_UID:raise CloudError('此帳號沒有管理員權限')
         self.token=d['idToken'];self.refresh_token=d['refreshToken'];self.expires=time.monotonic()+int(d['expiresIn'])-90
@@ -45,7 +77,7 @@ class Cloud:
         if self.token and time.monotonic()<self.expires:return self.token
         if not self.refresh_token:raise CloudError('請先登入 Firebase 管理員')
         r=requests.post(f'https://securetoken.googleapis.com/v1/token?key={API_KEY}',data={'grant_type':'refresh_token','refresh_token':self.refresh_token},timeout=15)
-        if not r.ok:raise CloudError('管理員登入已失效，請執行「設定與登入.cmd」重新登入')
+        if not r.ok:raise auth_error(r,'更新登入')
         d=r.json()
         if d.get('user_id')!=ADMIN_UID:raise CloudError('管理員 UID 不符')
         self.token=d['id_token'];self.refresh_token=d['refresh_token'];self.expires=time.monotonic()+int(d['expires_in'])-90

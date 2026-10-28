@@ -15,3 +15,5 @@
 另外：Python compileall、index.html 內嵌 JavaScript、desktop.js 的 node --check、HTML ID 唯一性。
 
 未完成：Windows DPAPI / ACL / 開機自動啟動實機驗證；真實 Firebase 規則 / REST updateTime 衝突整合；TG 真實收碼與發訊；50 帳號負載；瀏覽器視覺測試。模擬測試不代表正式環境已可連線。
+
+登入診斷更新：17 項電腦端測試通過，新增登入錯誤代碼與 API 限制原因辨識，確認不輸出回應內的密碼或 token。未進行真實 Firebase 帳密測試。

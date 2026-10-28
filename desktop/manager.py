@@ -87,7 +87,13 @@ def main():
     except FileNotFoundError:
         config={'worker_id':str(uuid.uuid4()),'accounts':{}};vault.save('settings',config)
     cloud=Cloud(vault)
-    if not cloud.refresh_token:firebase_login(cloud)
+    if not cloud.refresh_token:
+        while True:
+            try:
+                firebase_login(cloud);break
+            except CloudError as e:
+                print(str(e))
+                if input('按 Enter 重試，或輸入 0 離開：').strip()=='0':return
     if not args.setup and config['accounts']:
         asyncio.run(Engine(cloud,DATA,config['worker_id'],config['accounts']).run());return
     while True:

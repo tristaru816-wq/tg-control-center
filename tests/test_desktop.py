@@ -142,3 +142,23 @@ def test_firestore_precondition_conflict_is_retryable(monkeypatch):
     monkeypatch.setattr(cloud.requests,'patch',lambda *a,**kw:Reply())
     c=cloud.Cloud(Vault());c.token='memory-only';c.expires=time.monotonic()+100
     with pytest.raises(cloud.Conflict):c.patch({'desktopStatus':{}},'old-version')
+
+@pytest.mark.parametrize('code', ['INVALID_LOGIN_CREDENTIALS','API_KEY_HTTP_REFERRER_BLOCKED','OPERATION_NOT_ALLOWED'])
+def test_auth_error_displays_safe_actionable_code(code):
+    class Reply:
+        status_code=400
+        def json(self):return {'error':{'message':code,'metadata':{'password':'private-password','idToken':'private-token'}}}
+    message=str(cloud.auth_error(Reply()))
+    assert code in message
+    assert 'private-password' not in message and 'private-token' not in message
+
+def test_auth_error_uses_reason_and_hides_unrecognized_body():
+    class Reply:
+        status_code=403
+        def json(self):return {'error':{'message':'contains private-password','details':[{'reason':'API_KEY_HTTP_REFERRER_BLOCKED'}]}}
+    assert 'API_KEY_HTTP_REFERRER_BLOCKED' in str(cloud.auth_error(Reply()))
+    class Unknown:
+        status_code=500
+        def json(self):return {'error':{'message':'private-password'}}
+    text=str(cloud.auth_error(Unknown()))
+    assert 'HTTP_500' in text and 'private-password' not in text
