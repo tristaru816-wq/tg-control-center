@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // TG project only: review before replacing any existing rules.
+    match /adminData/{uid} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == '3bYS2rcw9jOf4A5sIvdO5DejMKP2'
+        && uid == request.auth.uid;
+    }
+    // Admin SDK uses IAM and bypasses these client access rules.
+    match /{document=**} { allow read, write: if false; }
+  }
+}
