@@ -162,3 +162,23 @@ def test_auth_error_uses_reason_and_hides_unrecognized_body():
         def json(self):return {'error':{'message':'private-password'}}
     text=str(cloud.auth_error(Unknown()))
     assert 'HTTP_500' in text and 'private-password' not in text
+
+def test_online_history_midnight_only_clears_success():
+    rows=[{'kind':'online_success','at':'2026-10-27T23:59:00+08:00'},{'kind':'online_success','at':'2026-10-28T00:01:00+08:00'},{'kind':'operation','at':'2026-10-27T22:00:00+08:00'}]
+    result=engine.today_history(rows,'2026-10-28')
+    assert len(result)==2 and result[0]['at'].startswith('2026-10-28')
+
+def test_hold_ends_when_paused(worker,monkeypatch):
+    e,c=worker;client=AsyncMock();monkeypatch.setattr(e,'client',lambda aid:client)
+    e.holds['a']={'until':time.monotonic()+300,'refresh':time.monotonic()+45}
+    c.data['desktopConfig']['plans']['a']['enabled']=False
+    asyncio.run(e.maintain_holds())
+    assert 'a' not in e.holds
+    client.disconnect.assert_awaited_once()
+
+def test_hold_ends_after_five_minutes(worker,monkeypatch):
+    e,c=worker;client=AsyncMock();monkeypatch.setattr(e,'client',lambda aid:client)
+    e.holds['a']={'until':time.monotonic()-1,'refresh':0}
+    asyncio.run(e.maintain_holds())
+    assert not e.holds
+    client.disconnect.assert_awaited_once()

@@ -6,6 +6,7 @@ import json
 import sqlite3
 import time
 from telethon import TelegramClient,errors
+from telethon.tl.functions.account import UpdateStatusRequest
 from cloud import CloudError,Conflict
 from scheduling import TZ,slot
 
@@ -13,7 +14,7 @@ class Busy(CloudError):pass
 class Engine:
     def __init__(self,cloud,root,worker_id,accounts):
         self.cloud=cloud;self.root=root;self.worker_id=worker_id;self.accounts=accounts;self.disabled=False
-        self.clients={};self.ready=set();self.last_renew=0
+        self.clients={};self.ready=set();self.last_renew=0;self.holds={}
         self.sql=sqlite3.connect(root/'runs.db')
         self.sql.execute('CREATE TABLE IF NOT EXISTS runs(aid TEXT, slot TEXT, status TEXT, detail TEXT, at TEXT, PRIMARY KEY(aid,slot))');self.sql.commit()
     def client(self,aid):
@@ -46,7 +47,7 @@ class Engine:
         def change(d):
             lease=d.get('desktopLease',{})
             if lease.get('owner')!=self.worker_id and lease.get('until',0)>d['_serverNow']:raise Busy('另一台電腦正在執行，這台等待接手')
-            st=d.get('desktopStatus',{});st.update({'workerId':self.worker_id,'version':'3.0','lastSeen':d['_serverNow'],'online':not offline,'readyAccounts':sorted(self.ready)})
+            st=d.get('desktopStatus',{});st['history']=today_history(st.get('history',[]));st.update({'workerId':self.worker_id,'version':'3.0','lastSeen':d['_serverNow'],'online':not offline,'readyAccounts':sorted(self.ready)})
             return {'desktopLease':{'owner':self.worker_id,'until':d['_serverNow']+(0 if offline else 120)},'desktopStatus':st},None
         self.mutate(change);self.last_renew=time.monotonic()
     def report(self,aid,value):
@@ -54,9 +55,9 @@ class Engine:
             if not self.own(d):raise Busy('已失去執行權，不再更新狀態')
             st=d.get('desktopStatus',{});rows=st.setdefault('accounts',{});old=rows.get(aid,{})
             rows[aid]={**old,**value,'at':datetime.now(TZ).isoformat()}
-            history=st.get('history',[])
-            history.insert(0,{'account':aid,'at':rows[aid]['at'],'status':value.get('status',''),'detail':value.get('detail','')})
-            st['history']=history[:100]
+            history=today_history(st.get('history',[]))
+            history.insert(0,{'account':aid,'at':rows[aid]['at'],'status':value.get('status',''),'kind':value.get('kind','operation'),'detail':value.get('detail','')})
+            st['history']=history[:3000]
             return {'desktopStatus':st},None
         self.mutate(change)
     def claim(self,aid):
@@ -100,6 +101,7 @@ class Engine:
                 if not await cl.is_user_authorized():
                     self.ready.discard(aid);raise RuntimeError('TG_LOGIN_REQUIRED')
                 await cl.get_me()
+                await cl(UpdateStatusRequest(offline=False))
                 if plan['mode']=='send':
                     target=plan['target'];target=int(target) if target.lstrip('-').isdigit() else target
                     result=await cl.send_message(target,plan['message'],parse_mode=None)
@@ -110,11 +112,37 @@ class Engine:
         except Exception as e:
             status,detail,blocked='unknown',f'{type(e).__name__}：結果待確認，已暫停此帳號；請核對群組',True
         finally:
-            try:await asyncio.wait_for(cl.disconnect(),3)
-            except Exception:pass
+            if status=='ok':self.holds[aid]={'until':time.monotonic()+300,'refresh':time.monotonic()+45}
+            else:
+                self.holds.pop(aid,None)
+                try:await asyncio.wait_for(cl.disconnect(),3)
+                except Exception:pass
+        if status=='ok':detail='TG 上線請求成功，維持連線 5 分鐘；'+detail
         self.sql.execute('UPDATE runs SET status=?, detail=? WHERE aid=? AND slot=?',(status,detail,aid,key));self.sql.commit()
         # If this write fails, the cloud claim remains 'running', and a future worker blocks it.
-        self.report(aid,{'status':status,'detail':detail,'blocked':blocked,'cooldownUntil':cooldown})
+        self.report(aid,{'status':status,'detail':detail,'blocked':blocked,'cooldownUntil':cooldown,'kind':'online_success' if status=='ok' else 'operation'})
+    async def maintain_holds(self):
+        for aid,h in list(self.holds.items()):
+            cl=self.client(aid)
+            try:
+                if time.monotonic()-self.last_renew>30:self.heartbeat()
+                d=self.cloud.get()
+                p=d.get('desktopConfig',{}).get('plans',{}).get(aid,{})
+                allowed=any(a.get('id')==aid for a in d.get('dashboard',{}).get('accounts',[]))
+                active=self.own(d) and allowed and not d.get('desktopStatus',{}).get('accounts',{}).get(aid,{}).get('blocked') and p.get('enabled') and time.monotonic()<h['until']
+                if not active:
+                    if self.own(d):
+                        async with asyncio.timeout(10):await cl(UpdateStatusRequest(offline=True))
+                    await asyncio.wait_for(cl.disconnect(),3);self.holds.pop(aid,None)
+                elif time.monotonic()>=h['refresh']:
+                    async with asyncio.timeout(10):await cl(UpdateStatusRequest(offline=False))
+                    h['refresh']=time.monotonic()+45
+            except Exception:
+                self.holds.pop(aid,None)
+                try:await asyncio.wait_for(cl.disconnect(),3)
+                except Exception:pass
+                try:self.report(aid,{'status':'unknown','blocked':True,'kind':'operation','detail':'維持在線中斷，請確認連線後解除暫停'})
+                except Exception:pass
     async def run(self):
         print('正在檢查本機 TG 登入…');await self.discover()
         print(f'{len(self.ready)} 個本機 TG 帳號可用。請用手機後台設定「電腦執行」排程。')
@@ -123,6 +151,7 @@ class Engine:
             while True:
                 try:
                     if time.monotonic()-self.last_renew>30:self.heartbeat()
+                    await self.maintain_holds()
                     d=self.cloud.get();ids=[x['id'] for x in d.get('dashboard',{}).get('accounts',[])[:50]]
                     for aid in ids:
                         if aid not in self.accounts or aid not in self.ready:continue
@@ -137,6 +166,7 @@ class Engine:
                         # Refresh the global lease before each bounded operation if needed.
                         if time.monotonic()-self.last_renew>30:self.heartbeat()
                         await self.run_account(aid)
+                        await self.maintain_holds()
                     await asyncio.sleep(15)
                 except (CloudError,OSError,ValueError) as e:
                     print('暫停 TG 執行：'+str(e));await asyncio.sleep(15)
@@ -157,3 +187,7 @@ def validate_plan(p):
     if p['start']==p['end'] or p.get('interval') not in (3,5,10,15):raise ValueError('排程時段或間隔錯誤')
     if p.get('mode') not in ('check','send'):raise ValueError('排程模式錯誤')
     if p['mode']=='send' and (not str(p.get('target','')).strip() or not str(p.get('message','')).strip() or len(p['message'])>4096):raise ValueError('缺少發送目標或文字')
+
+def today_history(rows,day=None):
+    day=day or datetime.now(TZ).date().isoformat()
+    return [r for r in rows if r.get('kind')!='online_success' or str(r.get('at',''))[:10]==day]
